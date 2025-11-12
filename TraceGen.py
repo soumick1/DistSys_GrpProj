@@ -17,19 +17,19 @@ def parse_data(datasetPath:str, day:int=1):
             reader = csv.reader(f)
             durationData = list(reader)
     except IOError:
-        print("Could not read file: ", durationFile)
+        print("Could not read file: 1 ", durationFile)
     try:
         with open(memoryFile, 'r') as f:
             reader = csv.reader(f)
             memoryData = list(reader)
     except IOError:
-        print("Could not read file: ", memoryFile)
+        print("Could not read file: 2 ", memoryFile)
     try:
         with open(invocationFile, 'r') as f:
             reader = csv.reader(f)
             invocationData = list(reader)
     except IOError:
-        print("Could not read file: ", invocationFile)
+        print("Could not read file: 3", invocationFile)
     assert durationData and memoryData and invocationData, "Data not loaded"
     
     # key: (HashOwner, HashApp)
@@ -83,13 +83,13 @@ def parse_data(datasetPath:str, day:int=1):
     print("Data loaded successfully")
     
     # dump maps to files
-    with open(f"{datasetPath}/functionMap_d{strDay}.csv", 'w', newline='') as f:
+    with open(f"{datasetPath}/functionMap_d{strDay}.csv", 'w') as f:
         writer = csv.writer(f)
         writer.writerow(["HashOwner", "HashApp", "HashFunction", "coldStartTime", "duration", "memory"])
         for key in functionMap:
             function = functionMap[key]
             writer.writerow([function.HashOwner, function.HashApp, function.HashFunction, function.coldStartTime, function.duration, function.memory])
-    with open(f"{datasetPath}/invocationMap_d{strDay}.csv", 'w', newline='') as f:
+    with open(f"{datasetPath}/invocationMap_d{strDay}.csv", 'w') as f:
         writer = csv.writer(f)
         writer.writerow(["HashOwner", "HashApp", "HashFunction", "Trigger", "Counts"])
         for key in invocationMap:
@@ -111,8 +111,6 @@ def load_data(datasetPath:str, day:int=1, type:str=None) -> tuple[dict[tuple[int
         with open(functionFile, 'r') as f:
             reader = csv.reader(f)
             for line in reader:
-                if not line or not line[0].strip():  # <-- skip blank rows
-                    continue
                 if line[0] == "HashOwner":
                     continue
                 functionMap[(line[0], line[1], line[2])] = Function(line[0], line[1], line[2], float(line[3]), float(line[4]), float(line[5]))
@@ -122,8 +120,6 @@ def load_data(datasetPath:str, day:int=1, type:str=None) -> tuple[dict[tuple[int
         with open(invocationFile, 'r') as f:
             reader = csv.reader(f)
             for line in reader:
-                if not line or not line[0].strip():  # <-- skip blank rows
-                    continue
                 if line[0] == "HashOwner":
                     continue
                 invocationMap[(line[0], line[1], line[2])] = Invocation(line[0], line[1], line[2], line[3], list(map(int, line[4:])))
@@ -177,7 +173,72 @@ def getRepresentativeData(functionMap, invocationMap, nFunction:int=100):
             newfunctionMap[functionId] = functionMap[functionId]
             newInvocationMap[functionId] = invocationMap[functionId]
     return newfunctionMap, newInvocationMap
+
+def getTemporalData(functionMap, invocationMap, nFunction:int=100):
+    temporalFeatures = []
+    # Step 1: Compute temporal stats for each function
+    for functionId, invocation in invocationMap.items():
+        Counts = invocation.Counts
+        total = sum(Counts)
+        if total == 0:
+            continue
+        active_minutes = sum(c > 0 for c in Counts)
+        burst_factor = max(Counts) / (np.mean(Counts) + 1e-9)
+        hourly_sums = [sum(Counts[i:i+60]) for i in range(0, len(Counts), 60)]
+        peak_hour = int(np.argmax(hourly_sums))
+        idle_ratio = 1 - active_minutes / len(Counts)
+        temporalFeatures.append((functionId, total, active_minutes, burst_factor, peak_hour, idle_ratio))
+        # print((total, active_minutes, burst_factor, peak_hour, idle_ratio))
+
+    # Step 2: Categorize functions
+    steady, bursty, sporadic, night = [], [], [], []
+    for fid, total, active, burst, peak, idle in temporalFeatures:
+        if burst < 2 and active > 1000:
+            steady.append(fid)
+        elif 2 <= burst <= 5 and 200 <= active <= 1000:
+            bursty.append(fid)
+        elif burst > 5 or active < 200:
+            sporadic.append(fid)
+        elif peak < 6:  # night-active
+            night.append(fid)
     
+    # Step 3: Sample from each group
+    newfunctionMap, newInvocationMap = {}, {}
+    groups = [steady, bursty, sporadic, night]
+    # print
+    nSample = max(1, nFunction // len(groups))
+    for group in groups:
+        # print(group)
+        if len(group) == 0: continue
+        arr = np.array(group)
+        # print(arr.shape)
+        sample_index = np.random.choice(range(0,len(group)), min(nSample, len(group)), replace=False)
+        sampleIds = [group[ind] for ind in sample_index]
+        for fid in sampleIds:
+            newfunctionMap[fid] = functionMap[fid]
+            newInvocationMap[fid] = invocationMap[fid]
+
+    # print(f"Temporal dataset created: {len(newInvocationMap)} functions sampled")
+    return newfunctionMap, newInvocationMap
+import numpy as np
+
+def getBernoulliThinnedData(functionMap, invocationMap, p: float = 0.2, seed: int = 42):
+    if not (0.0 <= p <= 1.0) or np.isnan(p):
+        raise ValueError(f"Thinning probability p must be in [0,1]. Got p={p!r}")
+
+    rng = np.random.default_rng(seed)
+    newfunctionMap = functionMap
+    newInvocationMap = {}
+
+    for fid, inv in invocationMap.items():
+        counts = np.asarray(inv.Counts, dtype=int)
+        thinned = rng.binomial(counts, p).tolist()
+        newInvocationMap[fid] = Invocation(
+            inv.HashOwner, inv.HashApp, inv.HashFunction, inv.Trigger, thinned
+        )
+
+    return newfunctionMap, newInvocationMap
+
 def getDataset(functionMap, invocationMap, datasetType:str, nFunction:int=100):
     nFunction = int(nFunction)
     if datasetType == "Rare":
@@ -186,18 +247,23 @@ def getDataset(functionMap, invocationMap, datasetType:str, nFunction:int=100):
         return getRandomData(functionMap, invocationMap, nFunction)
     elif datasetType == "Representative":
         return getRepresentativeData(functionMap, invocationMap, nFunction)
+    elif datasetType == "Temporal":
+        return getTemporalData(functionMap, invocationMap, nFunction)
+    elif datasetType == "Bernoulli":
+        return getBernoulliThinnedData(functionMap, invocationMap, p=0.7, seed=42)
+
     else:
         raise ValueError("Invalid dataset type")
     
 def dumpData(functionMap, invocationMap, type:str, datasetPath:str, day:int=1):
     strDay = f"{day:02}"
-    with open(f"{datasetPath}/functionMap_{type}_d{strDay}.csv", 'w', newline='') as f:
+    with open(f"{datasetPath}/functionMap_{type}_d{strDay}.csv", 'w') as f:
         writer = csv.writer(f)
         writer.writerow(["HashOwner", "HashApp", "HashFunction", "coldStartTime", "duration", "memory"])
         for key in functionMap:
             function = functionMap[key]
             writer.writerow([function.HashOwner, function.HashApp, function.HashFunction, function.coldStartTime, function.duration, function.memory])
-    with open(f"{datasetPath}/invocationMap_{type}_d{strDay}.csv", 'w', newline='') as f:
+    with open(f"{datasetPath}/invocationMap_{type}_d{strDay}.csv", 'w') as f:
         writer = csv.writer(f)
         writer.writerow(["HashOwner", "HashApp", "HashFunction", "Trigger", "Counts"])
         for key in invocationMap:
@@ -205,7 +271,7 @@ def dumpData(functionMap, invocationMap, type:str, datasetPath:str, day:int=1):
             writer.writerow([invocation.HashOwner, invocation.HashApp, invocation.HashFunction, invocation.Trigger]+invocation.Counts)
     
 if __name__ == "__main__":
-    for type in ["Representative", "Rare", "Random"]:
+    for type in ["Representative", "Rare", "Random","Bernoulli","Temporal"]:
         functionMap, invocationMap = load_data(config.datasetLocation, 1)
         functionMap, invocationMap = getDataset(functionMap, invocationMap, type, 400 if type!="Rare" else 1.5e4)
         print(f"{type} dataset, function count: {len(invocationMap)}")
