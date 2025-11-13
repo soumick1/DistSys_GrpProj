@@ -368,6 +368,14 @@ Reference run for comparisons. In current scripts it equals **TTL** (same number
 
 ---
 
+### Running the main file
+**Main** (async run on datasets):
+```bash
+python TraceGen.py # ---? run it once if you haven't run it
+python main.py # ---> runs on all datasets and on 16 workers
+python main.py --datasets Representative Rare Random --parallel 8 # ---> specific datasets and workers
+```
+
 ## Tuning Knobs
 
 - **Memory budget** \( B \) (MB): chart tradeoff curves (latency vs. memory).  
