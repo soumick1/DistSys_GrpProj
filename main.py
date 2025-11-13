@@ -64,16 +64,26 @@ if __name__ == "__main__":
             functionLimit=400,
             memoryBudget=17e3,
         ),
-        "Rare": Settings(
-            timeLimit=timeLimit,
-            functionLimit=1.5e4,
-            memoryBudget=6e4,
-        ),
-        "Random": Settings(
-            timeLimit=timeLimit,
-            functionLimit=400,
-            memoryBudget=4.5e4,
-        ),
+        # "Rare": Settings(
+        #     timeLimit=timeLimit,
+        #     functionLimit=1.5e4,
+        #     memoryBudget=6e4,
+        # ),
+        # "Random": Settings(
+        #     timeLimit=timeLimit,
+        #     functionLimit=400,
+        #     memoryBudget=4.5e4,
+        # ),
+        # "Bernoulli": Settings(
+        #     timeLimit=timeLimit,
+        #     functionLimit=400,
+        #     memoryBudget=4.5e4,
+        # ),
+        # "Temporal": Settings(
+        #     timeLimit=timeLimit,
+        #     functionLimit=400,
+        #     memoryBudget=4.5e4,
+        # ),
     }
 
     for dataset, setting in settings.items():
@@ -101,7 +111,7 @@ if __name__ == "__main__":
         l = []
         for policy in policies:
             # summary
-            with open(f"log/{policy}.csv", "r+") as f:
+            with open(f"log{dataset}/_{policy}.csv", "r+") as f:
                 lines = f.readlines()
                 minMemoryReq = float(lines[0].split(",")[1])
                 time, coldStartTime, memorySize, excutingTime, nColdStart, nExcution = (
